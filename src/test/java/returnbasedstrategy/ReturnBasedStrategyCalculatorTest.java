@@ -6,8 +6,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class ReturnBasedStrategyCalculatorTest {
 
     @Test
@@ -30,11 +28,10 @@ class ReturnBasedStrategyCalculatorTest {
                 Collections.singletonList(playerHand),
                 dealerHand,
                 seenCards,
-                6, // decks
-                0
+                6 // decks
         );
 
-        ReturnBasedStrategyCalculator decider = new ReturnBasedStrategyCalculator(new ProbabilityCalculator(), 3);
+        ReturnBasedStrategyCalculator decider = new ReturnBasedStrategyCalculator(new ProbabilityCalculator());
         DecisionType action = decider.recommendAction(state, playerHand);
         System.out.println("Recommended action: " + action);
     }

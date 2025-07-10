@@ -8,11 +8,10 @@ public class ProbabilityCalculator {
 
     public Map<Integer, Double> getCardProbabilities(int decks, List<Card> seenCards) {
         Map<Integer, Integer> remainingCards = new HashMap<>();
-        int totalCards = decks * 52;
 
         // Initialize with full deck counts
         for (int i = 2; i <= 11; i++) {
-            int count = (i == 10) ? 16 * decks : 4 * decks; // 10,J,Q,K count as 10
+            int count = (i == 10) ? 4 * 8 * decks : 4 * decks; // 10,J,Q,K count as 10
             remainingCards.put(i, count);
         }
 
@@ -23,9 +22,10 @@ public class ProbabilityCalculator {
         }
 
         // Calculate probabilities
-        int totalRemaining = remainingCards.values().stream().mapToInt(Integer::intValue).sum();
+        int totalRemaining = remainingCards.values().stream()
+                .mapToInt(Integer::intValue)
+                .sum();
         Map<Integer, Double> probabilities = new HashMap<>();
-
         for (Map.Entry<Integer, Integer> entry : remainingCards.entrySet()) {
             probabilities.put(entry.getKey(), (double)entry.getValue() / totalRemaining);
         }

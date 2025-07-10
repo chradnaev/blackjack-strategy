@@ -7,11 +7,9 @@ import static returnbasedstrategy.DecisionType.*;
 public class ReturnBasedStrategyCalculator {
 
     private final ProbabilityCalculator probabilityCalculator;
-    private final int maxHitDepth;
 
-    public ReturnBasedStrategyCalculator(ProbabilityCalculator probabilityCalculator, int maxHitDepth) {
+    public ReturnBasedStrategyCalculator(ProbabilityCalculator probabilityCalculator) {
         this.probabilityCalculator = probabilityCalculator;
-        this.maxHitDepth = maxHitDepth;
     }
 
     public DecisionType recommendAction(GameState gameState, Hand currentHand) {
@@ -20,7 +18,7 @@ public class ReturnBasedStrategyCalculator {
 
         // Calculate expected values for each possible action
         double standEV = calculateStandEV(currentHand, dealerUpCard, cardProbs);
-        double hitEV = canHit(currentHand, gameState.getHitDepth()) ? calculateHitEV(currentHand, dealerUpCard, cardProbs, gameState) : Double.NEGATIVE_INFINITY;
+        double hitEV = canHit(currentHand) ? calculateHitEV(currentHand, dealerUpCard, cardProbs, gameState) : Double.NEGATIVE_INFINITY;
         double doubleEV = canDouble(currentHand) ? calculateDoubleEV(currentHand, dealerUpCard, cardProbs) : Double.NEGATIVE_INFINITY;
         double splitEV = canSplit(currentHand) ? calculateSplitEV(currentHand, dealerUpCard, cardProbs, gameState) : Double.NEGATIVE_INFINITY;
 
@@ -33,8 +31,8 @@ public class ReturnBasedStrategyCalculator {
         return SPLIT;
     }
 
-    private boolean canHit(Hand hand, int hitDepth) {
-        return hand.getBestValue() <= 17 && hitDepth <= maxHitDepth;
+    private boolean canHit(Hand hand) {
+        return hand.getBestValue() <= 17;
     }
 
     private boolean canSplit(Hand currentHand) {
@@ -71,7 +69,6 @@ public class ReturnBasedStrategyCalculator {
 
     private double calculateHitEV(Hand hand, Card dealerCard, Map<Integer, Double> cardProbs, GameState gameState) {
         double totalEV = 0;
-        gameState.markHitDone();
 
         for (Map.Entry<Integer, Double> entry : cardProbs.entrySet()) {
             int cardValue = entry.getKey();
@@ -143,7 +140,7 @@ public class ReturnBasedStrategyCalculator {
                 hand1.addCard(new Card(pairValue));
                 hand1.addCard(new Card(card1));
 
-                Hand hand2 = new Hand();
+                Hand hand2 = new Hand(true);
                 hand2.addCard(new Card(pairValue));
                 hand2.addCard(new Card(card2));
 
@@ -171,20 +168,54 @@ public class ReturnBasedStrategyCalculator {
     }
 
     private Map<Integer, Double> calculateDealerFinalValueProbability(Card upCard, Map<Integer, Double> cardProbs) {
-        // Implement dealer outcome probabilities based on up card and remaining cards
-        // This would use similar recursive probability calculations as above
-        // Simplified for this example
-        return new HashMap<>();
+        Map<Integer, Double> probabilities = new HashMap<>();
+        calculateDealerOutcomes(upCard.getValue(), 0, 1.0, cardProbs, probabilities);
+        return probabilities;
+    }
+
+    private void calculateDealerOutcomes(int currentValue, int numAces, double currentProb,
+                                         Map<Integer, Double> cardProbs, Map<Integer, Double> result) {
+        // Dealer stands on hard 17 or higher
+        int hardValue = currentValue - (numAces * 10);
+        if (hardValue >= 17) {
+            // Dealer stands
+            int finalValue = Math.min(22, currentValue); // Cap at 22 (bust)
+            result.merge(finalValue, currentProb, Double::sum);
+            return;
+        }
+
+        // Dealer must hit
+        for (Map.Entry<Integer, Double> entry : cardProbs.entrySet()) {
+            int cardValue = entry.getKey();
+            double prob = entry.getValue();
+
+            int newValue = currentValue + cardValue;
+            int newAces = numAces + (cardValue == Card.ACE ? 1 : 0);
+
+            // Handle soft totals
+            while (newValue > 21 && newAces > 0) {
+                newValue -= 10;
+                newAces--;
+            }
+
+            if (newValue > 21) {
+                // Dealer busts
+                result.merge(22, currentProb * prob, Double::sum);
+            } else {
+                // Recurse
+                calculateDealerOutcomes(newValue, newAces, currentProb * prob, cardProbs, result);
+            }
+        }
     }
 
     private double calculateDealerBustProbability(Card upCard, Map<Integer, Double> cardProbs) {
-        // Simplified - in reality would need full dealer simulation
-        return 0.28; // Example value
+        Map<Integer, Double> finalProbs = calculateDealerFinalValueProbability(upCard, cardProbs);
+        return finalProbs.getOrDefault(22, 0.0);
     }
 
     private GameState updateGameState(GameState current, Card... newCards) {
         List<Card> newSeenCards = new ArrayList<>(current.getSeenCards());
         Collections.addAll(newSeenCards, newCards);
-        return new GameState(current.getPlayerHands(), current.getDealerHand(), newSeenCards, current.getDecks(), current.getHitDepth());
+        return new GameState(current.getPlayerHands(), current.getDealerHand(), newSeenCards, current.getDecks());
     }
 }
