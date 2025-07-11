@@ -1,8 +1,9 @@
 package returnbasedstrategy;
 
 public enum DecisionType {
-    STAND,
     HIT,
+    STAND,
+    SPLIT,
     DOUBLE,
-    SPLIT
+    DOUBLE_STAND
 }

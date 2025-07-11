@@ -9,27 +9,19 @@ class Hand {
     private final List<Card> cards;
     private final boolean splitted;
 
-    public Hand() {
-        this.cards = new ArrayList<>();
-        this.splitted = false;
-    }
-
-    public Hand(boolean splitted) {
-        this.cards = new ArrayList<>();
-        this.splitted = splitted;
-    }
-
     public Hand(List<Card> cards, boolean splitted) {
         this.splitted = splitted;
-        this.cards = new ArrayList<>(cards);
+        this.cards = Collections.unmodifiableList(cards);
     }
 
-    public void addCard(Card card) {
-        cards.add(card);
+    public Hand addCard(Card... newCards) {
+        ArrayList<Card> cards = new ArrayList<>(this.cards);
+        Collections.addAll(cards, newCards);
+        return new Hand(cards, splitted);
     }
 
     public List<Card> getCards() {
-        return Collections.unmodifiableList(cards);
+        return cards;
     }
 
     public boolean isSplitted() {
@@ -50,7 +42,9 @@ class Hand {
 
     public int getBestValue() {
         int value = getHardValue();
-        int aces = (int) cards.stream().filter(c -> c.getValue() == Card.ACE).count();
+        int aces = (int) cards.stream()
+                .filter(c -> c.getValue() == Card.ACE)
+                .count();
 
         while (value > 21 && aces > 0) {
             value -= 10;
@@ -58,6 +52,14 @@ class Hand {
         }
 
         return value;
+    }
+
+    public int getSoftValue() {
+        int value = getHardValue();
+        int aces = (int) cards.stream()
+                .filter(c -> c.getValue() == Card.ACE)
+                .count();
+        return value - aces * 10;
     }
 
     @Override

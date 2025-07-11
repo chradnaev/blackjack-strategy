@@ -1,18 +1,47 @@
 package returnbasedstrategy;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static returnbasedstrategy.DecisionType.*;
 
 public class ReturnBasedStrategyCalculator {
-
     private final ProbabilityCalculator probabilityCalculator;
+    private final Map<Integer, DecisionType> cache = new ConcurrentHashMap<>();
+    private final AtomicReference<Integer> currentlyComputing = new AtomicReference<>();
+    private final double blackJackPayoutMiltiplier;
 
-    public ReturnBasedStrategyCalculator(ProbabilityCalculator probabilityCalculator) {
+    public ReturnBasedStrategyCalculator(ProbabilityCalculator probabilityCalculator, double blackJackPayoutMiltiplier) {
         this.probabilityCalculator = probabilityCalculator;
+        this.blackJackPayoutMiltiplier = blackJackPayoutMiltiplier;
+    }
+
+    public DecisionType decidePlayerAction(List<Integer> pCards, int dCard, boolean canSplit, List<Integer> seenCardValues) {
+        Hand currentHand = new Hand(toCards(pCards), !canSplit);
+        Card dealerCard = new Card(dCard);
+        List<Card> seenCards = toCards(seenCardValues);
+        GameState gameState = new GameState(dealerCard, seenCards, 6);
+        return recommendAction(gameState, currentHand);
     }
 
     public DecisionType recommendAction(GameState gameState, Hand currentHand) {
+        Integer key = new CacheKey(gameState, currentHand).hashCode();
+        if (key.equals(currentlyComputing.get())) {
+            throw new IllegalStateException("Recursive call to compute key: " + key);
+        }
+        if (cache.containsKey(key)) {
+            return cache.get(key);
+        }
+        currentlyComputing.set(key);
+        DecisionType decisionType = computeDecision(gameState, currentHand);
+        cache.put(key, decisionType);
+        currentlyComputing.set(null);
+        return decisionType;
+    }
+
+    private DecisionType computeDecision(GameState gameState, Hand currentHand) {
         Map<Integer, Double> cardProbs = probabilityCalculator.getCardProbabilities(gameState.getDecks(), gameState.getSeenCards());
         Card dealerUpCard = gameState.getDealerUpCard();
 
@@ -32,7 +61,7 @@ public class ReturnBasedStrategyCalculator {
     }
 
     private boolean canHit(Hand hand) {
-        return hand.getBestValue() <= 17;
+        return hand.getBestValue() <= 17 && hand.getCards().size() < 3;
     }
 
     private boolean canSplit(Hand currentHand) {
@@ -48,23 +77,27 @@ public class ReturnBasedStrategyCalculator {
         int playerValue = hand.getBestValue();
         if (playerValue > 21) return -1; // Already bust
 
-        double dealerBustProb = calculateDealerBustProbability(dealerCard, cardProbs);
         Map<Integer, Double> dealerFinalValueProb = calculateDealerFinalValueProbability(dealerCard, cardProbs);
 
-        double ev = dealerBustProb; // Dealer busts, we win
+        double ev = dealerFinalValueProb.getOrDefault(22, 0.0); // Dealer busts, we win
 
         for (int dealerValue = 17; dealerValue <= 21; dealerValue++) {
             double prob = dealerFinalValueProb.getOrDefault(dealerValue, 0.0);
             if (playerValue > dealerValue) {
-                ev += prob; // Win
+                ev += getPayMultiplier(playerValue, hand.getCards().size()) * prob; // Win
             } else if (playerValue == dealerValue) {
                 // Push (no change to EV)
+                ev -= 0.5 * prob;
             } else {
                 ev -= prob; // Lose
             }
         }
 
         return ev;
+    }
+
+    private double getPayMultiplier(int score, int cardCount) {
+        return score == 21 && cardCount == 2 ? blackJackPayoutMiltiplier - 1 : 1.0;
     }
 
     private double calculateHitEV(Hand hand, Card dealerCard, Map<Integer, Double> cardProbs, GameState gameState) {
@@ -74,8 +107,7 @@ public class ReturnBasedStrategyCalculator {
             int cardValue = entry.getKey();
             double prob = entry.getValue();
 
-            Hand newHand = new Hand(hand.getCards(), hand.isSplitted());
-            newHand.addCard(new Card(cardValue));
+            Hand newHand = hand.addCard(new Card(cardValue));
 
             if (newHand.getBestValue() > 21) {
                 totalEV += prob * -1; // Bust
@@ -107,8 +139,7 @@ public class ReturnBasedStrategyCalculator {
             int cardValue = entry.getKey();
             double prob = entry.getValue();
 
-            Hand newHand = new Hand(hand.getCards(), hand.isSplitted());
-            newHand.addCard(new Card(cardValue));
+            Hand newHand = hand.addCard(new Card(cardValue));
 
             if (newHand.getBestValue() > 21) {
                 totalEV += prob * -2; // Bust, lose double
@@ -136,13 +167,8 @@ public class ReturnBasedStrategyCalculator {
                 double prob2 = entry2.getValue();
 
                 // Create two new hands
-                Hand hand1 = new Hand(true);
-                hand1.addCard(new Card(pairValue));
-                hand1.addCard(new Card(card1));
-
-                Hand hand2 = new Hand(true);
-                hand2.addCard(new Card(pairValue));
-                hand2.addCard(new Card(card2));
+                Hand hand1 = new Hand(Arrays.asList(new Card(pairValue), new Card(card1)), true);
+                Hand hand2 = new Hand(Arrays.asList(new Card(pairValue), new Card(card2)), true);
 
                 // Calculate EV for each hand
                 GameState newState = updateGameState(gameState, new Card(card1), new Card(card2));
@@ -169,7 +195,7 @@ public class ReturnBasedStrategyCalculator {
 
     private Map<Integer, Double> calculateDealerFinalValueProbability(Card upCard, Map<Integer, Double> cardProbs) {
         Map<Integer, Double> probabilities = new HashMap<>();
-        calculateDealerOutcomes(upCard.getValue(), 0, 1.0, cardProbs, probabilities);
+        calculateDealerOutcomes(upCard.getValue(), upCard.getValue() == 1 ? 1 : 0, 1.0, cardProbs, probabilities);
         return probabilities;
     }
 
@@ -183,16 +209,16 @@ public class ReturnBasedStrategyCalculator {
             result.merge(finalValue, currentProb, Double::sum);
             return;
         }
-
-        // Dealer must hit
+        // Dealer must
         for (Map.Entry<Integer, Double> entry : cardProbs.entrySet()) {
             int cardValue = entry.getKey();
             double prob = entry.getValue();
 
-            int newValue = currentValue + cardValue;
+            int newHardValue = currentValue + cardValue;
             int newAces = numAces + (cardValue == Card.ACE ? 1 : 0);
 
             // Handle soft totals
+            int newValue = newHardValue;
             while (newValue > 21 && newAces > 0) {
                 newValue -= 10;
                 newAces--;
@@ -203,19 +229,18 @@ public class ReturnBasedStrategyCalculator {
                 result.merge(22, currentProb * prob, Double::sum);
             } else {
                 // Recurse
-                calculateDealerOutcomes(newValue, newAces, currentProb * prob, cardProbs, result);
+                calculateDealerOutcomes(newHardValue, newAces, currentProb * prob, cardProbs, result);
             }
         }
     }
 
-    private double calculateDealerBustProbability(Card upCard, Map<Integer, Double> cardProbs) {
-        Map<Integer, Double> finalProbs = calculateDealerFinalValueProbability(upCard, cardProbs);
-        return finalProbs.getOrDefault(22, 0.0);
+    private List<Card> toCards(List<Integer> pCards) {
+        return pCards.stream().map(Card::new).collect(Collectors.toList());
     }
 
     private GameState updateGameState(GameState current, Card... newCards) {
         List<Card> newSeenCards = new ArrayList<>(current.getSeenCards());
         Collections.addAll(newSeenCards, newCards);
-        return new GameState(current.getPlayerHands(), current.getDealerHand(), newSeenCards, current.getDecks());
+        return new GameState(current.getDealerUpCard(), newSeenCards, current.getDecks());
     }
 }

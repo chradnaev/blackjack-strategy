@@ -11,7 +11,7 @@ public class ProbabilityCalculator {
 
         // Initialize with full deck counts
         for (int i = 2; i <= 11; i++) {
-            int count = (i == 10) ? 4 * 8 * decks : 4 * decks; // 10,J,Q,K count as 10
+            int count = (i == 10) ? 4 * 4 * decks : 4 * decks; // 10,J,Q,K count as 10
             remainingCards.put(i, count);
         }
 
